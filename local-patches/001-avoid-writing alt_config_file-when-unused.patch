@@ -1,0 +1,50 @@
+From ae8a86a4c48d29de50ec25c77137d637ac1578bf Mon Sep 17 00:00:00 2001
+From: Jackie Han <jackie.han@gmail.com>
+Date: Thu, 22 Oct 2026 21:41:55 +0800
+Subject: [PATCH] luci-app-keepalived: avoid writing alt_config_file when
+ unused
+
+Remove default value for alt_config_file to prevent automatic
+writing into /etc/config/keepalived when saving global settings.
+
+Derive the UI-only "Use alternative config file" toggle state
+directly from alt_config_file presence, eliminating the need to
+store an additional flag in UCI.
+
+Signed-off-by: Jackie Han <jackie.han@gmail.com>
+---
+ .../luci-static/resources/view/keepalived/globals.js | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/globals.js b/applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/globals.js
+index 2668bd67b6f1..387ce46b99ae 100644
+--- a/applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/globals.js
++++ b/applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/globals.js
+@@ -1,6 +1,7 @@
+ 'use strict';
+ 'require view';
+ 'require form';
++'require uci';
+ 
+ return view.extend({
+ 	render() {
+@@ -20,9 +21,18 @@ return view.extend({
+ 		o.optional = true;
+ 		o.placeholder = 'OpenWrt';
+ 
++		o = s.option(form.Flag, 'use_alt_config_file', _('Use alternative config file'),
++			_('Bypass UCI-generated configuration and load a native keepalived.conf directly from a file you provide.'));
++		/* UI-only switch: its state is derived from alt_config_file and never stored */
++		o.cfgvalue = function(section_id) {
++			return uci.get('keepalived', section_id, 'alt_config_file') ? this.enabled : this.disabled;
++		};
++		o.write = function() {};
++		o.remove = function() {};
++
+ 		o = s.option(form.FileUpload, 'alt_config_file', _('Alternative config'));
+ 		o.optional = true;
+-		o.default = '/etc/keepalived/keepalived.conf';
++		o.depends('use_alt_config_file', '1');
+ 		o.root_directory = '/etc/';
+ 
+ 		o = s.option(form.Flag, 'linkbeat_use_polling', _('Link Polling'),
