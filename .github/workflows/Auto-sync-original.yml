@@ -42,71 +42,48 @@ jobs:
           echo "🔄 Fetching upstream..."
           git fetch upstream master
 
-      - name: Fetch and Compare Official Version
+      - name: Fetch and Compare Official Release Version
         run: |
-          # Each entry: "<url>|<channel>" — channel is "snapshot" or "release"
-          SOURCES=(
-            "https://downloads.openwrt.org/snapshots/packages/x86_64/${FEED}/index.json|snapshot"
-            "https://downloads.openwrt.org/releases/packages-25.12/x86_64/${FEED}/index.json|release"
-            "https://downloads.openwrt.org/snapshots/packages/arm_cortex-a7_neon-vfpv4/${FEED}/index.json|snapshot"
-            "https://downloads.openwrt.org/releases/packages-25.12/arm_cortex-a7_neon-vfpv4/${FEED}/index.json|release"
-            "https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/${FEED}/index.json|snapshot"
-            "https://downloads.openwrt.org/releases/packages-25.12/aarch64_cortex-a53/${FEED}/index.json|release"
+          # 只跟踪 release (packages-25.12) 通道的官方版本
+          ARCHS=(
+            x86_64
+            arm_cortex-a7_neon-vfpv4
+            aarch64_cortex-a53
           )
 
           : > /tmp/fetched_versions.txt
-          for SRC in "${SOURCES[@]}"; do
-            URL="${SRC%%|*}"
-            CHANNEL="${SRC##*|}"
-            echo "🔍 Checking [$CHANNEL]: $URL"
+          for ARCH in "${ARCHS[@]}"; do
+            URL="https://downloads.openwrt.org/releases/packages-25.12/${ARCH}/${FEED}/index.json"
+            echo "🔍 Checking [release/$ARCH]: $URL"
             VER=$(curl -sL --retry 3 "$URL" | jq -r --arg pkg "$TARGET_PKG" '.packages[$pkg] // empty' 2>/dev/null || true)
 
             if [ -n "$VER" ] && [ "$VER" != "null" ]; then
               echo "   ↳ Found version: $VER"
-              echo "${VER}|${CHANNEL}" >> /tmp/fetched_versions.txt
+              echo "$VER" >> /tmp/fetched_versions.txt
             else
               echo "   ↳ ⚠️ Package not found or download failed."
             fi
           done
 
           if [ ! -s /tmp/fetched_versions.txt ]; then
-            echo "⚠️ Failed to fetch version from ALL sources, keeping previously recorded versions."
+            echo "⚠️ Failed to fetch version from ALL sources, keeping previously recorded version."
           fi
 
-          NEW_REL_VER=$(grep '|release$' /tmp/fetched_versions.txt | cut -d'|' -f1 | sort -V | tail -n 1 || true)
-          NEW_SNAP_VER=$(grep '|snapshot$' /tmp/fetched_versions.txt | cut -d'|' -f1 | sort -V | tail -n 1 || true)
+          NEW_REL_VER=$(sort -V /tmp/fetched_versions.txt | tail -n 1 || true)
           [ -z "$NEW_REL_VER" ] && NEW_REL_VER="none"
-          [ -z "$NEW_SNAP_VER" ] && NEW_SNAP_VER="none"
 
           OLD_REL_VER=$(cat .official_version_release 2>/dev/null || echo "none")
-          OLD_SNAP_VER=$(cat .official_version_snapshot 2>/dev/null || echo "none")
-
           [ "$NEW_REL_VER" = "none" ] && NEW_REL_VER="$OLD_REL_VER"
-          [ "$NEW_SNAP_VER" = "none" ] && NEW_SNAP_VER="$OLD_SNAP_VER"
 
-          NEW_CHANNEL=""
           if [ "$NEW_REL_VER" != "none" ] && [ "$NEW_REL_VER" != "$OLD_REL_VER" ]; then
-            NEW_CHANNEL="release"
-          fi
-          if [ "$NEW_SNAP_VER" != "none" ] && [ "$NEW_SNAP_VER" != "$OLD_SNAP_VER" ]; then
-            if [ -z "$NEW_CHANNEL" ]; then NEW_CHANNEL="snapshot"; else NEW_CHANNEL="both"; fi
-          fi
-
-          if [ -n "$NEW_CHANNEL" ]; then
             echo "VERSION_CHANGED=true" >> $GITHUB_ENV
-            echo "✅ Version changed! Update channel: $NEW_CHANNEL"
-            echo "   ↳ Release: $OLD_REL_VER -> $NEW_REL_VER"
-            echo "   ↳ Snapshot: $OLD_SNAP_VER -> $NEW_SNAP_VER"
+            echo "✅ Release version changed: $OLD_REL_VER -> $NEW_REL_VER"
           else
             echo "VERSION_CHANGED=false" >> $GITHUB_ENV
-            echo "💤 Version unchanged."
-            # 版本号未变但源码变化触发的提交,默认两端一起更新
-            NEW_CHANNEL="both"
+            echo "💤 Release version unchanged ($NEW_REL_VER)."
           fi
 
           echo "NEW_REL_VER=$NEW_REL_VER" >> $GITHUB_ENV
-          echo "NEW_SNAP_VER=$NEW_SNAP_VER" >> $GITHUB_ENV
-          echo "NEW_CHANNEL=$NEW_CHANNEL" >> $GITHUB_ENV
 
       - name: Assemble Raw Materials & Generate Precision Changelog
         run: |
@@ -142,29 +119,23 @@ jobs:
             echo "$CHANGELOG"
             if [ "$VERSION_CHANGED" = "true" ]; then
               echo ""
-              echo "===== 🚀 Official Version Update ====="
-              echo "Update Channel: $NEW_CHANNEL"
+              echo "===== 🚀 Official Release Version Update ====="
               echo "Release Version: $NEW_REL_VER"
-              echo "Snapshot Version: $NEW_SNAP_VER"
             fi
             echo "EOF_GHA"
           } >> $GITHUB_ENV
 
-          # 4. 清理工作区(保留元数据文件)
+          # 4. 清理工作区(只保留元数据文件;旧的 snapshot/channel 文件会在此被清掉)
           git rm -rf --cached . 2>/dev/null || true
           find . -mindepth 1 -maxdepth 1 \
             ! -name '.git' \
             ! -name '.upstream_meta' \
             ! -name '.official_version_release' \
-            ! -name '.official_version_snapshot' \
-            ! -name '.official_channel' \
             -exec rm -rf {} +
 
           # 5. 更新锚点文件
           echo "$NEW_HASH" > .upstream_meta
           echo "$NEW_REL_VER" > .official_version_release
-          echo "$NEW_SNAP_VER" > .official_version_snapshot
-          echo "$NEW_CHANNEL" > .official_channel
 
           # 6. 提取上游包目录并平铺到仓库根目录
           echo "📥 Extracting $UPSTREAM_PATH from upstream..."
@@ -198,8 +169,6 @@ jobs:
             ! -name 'SECURITY.md' \
             ! -name '.upstream_meta' \
             ! -name '.official_version_release' \
-            ! -name '.official_version_snapshot' \
-            ! -name '.official_channel' \
             -exec rm -rf {} +
 
           echo "📥 Overlaying pristine raw materials from Official-original..."
