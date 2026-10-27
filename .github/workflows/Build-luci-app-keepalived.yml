@@ -1,0 +1,219 @@
+name: Build luci-app-keepalived Package
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '.github/**'
+      - 'local-patches/**'
+      - 'README.md'
+      - 'LICENSE'
+      - 'SECURITY.md'
+  workflow_dispatch:
+
+env:
+  FEEDNAME: jackie264
+  # luci-app 是 noarch,只需用一个 SDK 编译一次
+  SDK_ARCH: x86_64-openwrt-25.12
+  # custom-packages 仓库中 release 通道的目录名
+  RELEASE_DIR: packages-25.12
+
+jobs:
+  check:
+    name: 1. Resolve Version
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.version.outputs.tag_name }}
+      main_version: ${{ steps.version.outputs.main_version }}
+      channel: ${{ steps.channel.outputs.channel }}
+
+    steps:
+      - name: 🧾 Checkout repo
+        uses: actions/checkout@v7
+
+      - name: 🔀 Detect version channel (snapshot vs release)
+        id: channel
+        run: |
+          if [ -f .official_channel ]; then
+            CH=$(tr -d '[:space:]' < .official_channel)
+          else
+            echo "⚠️ .official_channel not found, defaulting to 'both'."
+            CH="both"
+          fi
+
+          case "$CH" in
+            snapshot|release|both) ;;
+            *) echo "⚠️ Unexpected channel value '$CH', defaulting to 'both'."; CH="both" ;;
+          esac
+
+          echo "channel=$CH" >> "$GITHUB_OUTPUT"
+          echo "📡 Detected channel: $CH"
+
+      - name: 🏷️ Extract version info from Git Commit
+        id: version
+        run: |
+          set -euo pipefail
+          COMMIT_SHA=$(git rev-parse --short=7 HEAD)
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "Manual trigger detected. Using current time to force unique version."
+            BASE_TIMESTAMP=$(date +%s)
+          else
+            BASE_TIMESTAMP=$(git log -1 --format=%ct)
+          fi
+
+          # 与官方 luci 应用的版本格式一致: yy.ddd.ssssss~<sha>
+          PKG_VERSION_DATE=$(date -u -d "@${BASE_TIMESTAMP}" +'%y.%j')
+          PKG_VERSION_SECS=$(printf "%05d" $(( BASE_TIMESTAMP % 86400 )))
+          OFFICIAL_VERSION="${PKG_VERSION_DATE}.${PKG_VERSION_SECS}~${COMMIT_SHA}"
+          GIT_TAG_VERSION="${PKG_VERSION_DATE}.${PKG_VERSION_SECS}"
+
+          echo "tag_name=v${GIT_TAG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "main_version=${OFFICIAL_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "🏷️ Version: ${OFFICIAL_VERSION}"
+
+  build:
+    name: 2. Build ${{ github.event.repository.name }}
+    needs: check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🧾 Checkout repo
+        uses: actions/checkout@v7
+
+      - name: 📛 Set PKG_NAME from repo
+        run: echo "PKG_NAME=${{ github.event.repository.name }}" >> "$GITHUB_ENV"
+
+      - name: 🧰 Set up Feed structure
+        run: |
+          set -e
+          # Makefile 末尾是 `include ../../luci.mk`,因此包必须位于 <feed>/luci/applications/<pkg>/,
+          # 并在 <feed>/luci/ 下放一个转发到 SDK 内 luci feed 的 luci.mk。
+          mkdir -p package
+          printf 'include $(TOPDIR)/feeds/luci/luci.mk\n' > package/luci.mk
+
+          mkdir -p "feed/luci/applications/${PKG_NAME}"
+          printf 'include $(TOPDIR)/feeds/luci/luci.mk\n' > feed/luci/luci.mk
+
+          rsync -av \
+            --exclude='/.git' \
+            --exclude='/feed' \
+            --exclude='/package' \
+            --exclude='/.github' \
+            --exclude='/local-patches' \
+            --exclude='/SECURITY.md' \
+            --exclude='/README.md' \
+            --exclude='/LICENSE' \
+            --exclude='/.upstream_meta' \
+            --exclude='/.official_version_release' \
+            --exclude='/.official_version_snapshot' \
+            --exclude='/.official_channel' \
+            ./ "feed/luci/applications/${PKG_NAME}/"
+
+      - name: 🩹 Inject PKG_VERSION into Makefile
+        run: |
+          set -euo pipefail
+          OFFICIAL_VERSION="${{ needs.check.outputs.main_version }}"
+          echo "🚀 Using version: ${OFFICIAL_VERSION}"
+
+          MF="feed/luci/applications/${PKG_NAME}/Makefile"
+
+          # 该 Makefile 没有 LUCI_NAME / PKG_VERSION / PKG_RELEASE,
+          # 版本必须在 `include ../../luci.mk` 之前定义(luci.mk 用 ?= 取默认值)。
+          if ! grep -q '^include \.\./\.\./luci\.mk' "$MF"; then
+            echo "❌ 'include ../../luci.mk' not found in $MF"; exit 1
+          fi
+
+          sed -i '/^PKG_VERSION/d;/^PKG_RELEASE/d' "$MF"
+          sed -i "/^include \.\.\/\.\.\/luci\.mk/i PKG_VERSION:=${OFFICIAL_VERSION}" "$MF"
+          sed -i "/^include \.\.\/\.\.\/luci\.mk/i PKG_RELEASE:=" "$MF"
+
+          echo "✅ Patched Makefile:"
+          cat "$MF"
+
+      - name: 🏗️ Build with OpenWrt SDK
+        uses: openwrt/gh-action-sdk@v11
+        env:
+          ARCH: ${{ env.SDK_ARCH }}
+          FEEDNAME: ${{ env.FEEDNAME }}
+          PACKAGES: ${{ env.PKG_NAME }}
+          INDEX: 0
+          FEED_DIR: ${{ github.workspace }}/feed
+          NO_SHFMT_CHECK: 1
+          NO_REFRESH_CHECK: 1
+
+      - name: 📦 Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PKG_NAME }}
+          # 主包 + (若 SDK 一并构建了的)翻译包 luci-i18n-keepalived-*
+          path: |
+            bin/packages/*/${{ env.FEEDNAME }}/luci-app-keepalived*.apk
+            bin/packages/*/${{ env.FEEDNAME }}/luci-i18n-keepalived-*.apk
+          if-no-files-found: error
+
+  deploy:
+    name: 3. Deploy ${{ github.repository }}
+    needs: [check, build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ⬇️ Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: ./release-assets
+
+      - name: 🔑 Checkout custom-packages repo
+        uses: actions/checkout@v7
+        with:
+          repository: OneNAS-space/custom-packages
+          token: ${{ secrets.CUSTOM_PACKAGES_TOKEN }}
+          path: custom-packages
+
+      - name: 🚚 Update luci artifacts
+        run: |
+          set -e
+          CHANNEL="${{ needs.check.outputs.channel }}"
+          TAG="${{ needs.check.outputs.tag_name }}"
+
+          TARGET_DIRS=()
+          if [ "$CHANNEL" = "release" ] || [ "$CHANNEL" = "both" ]; then
+            TARGET_DIRS+=("custom-packages/releases/${RELEASE_DIR}/luci")
+          fi
+          if [ "$CHANNEL" = "snapshot" ] || [ "$CHANNEL" = "both" ]; then
+            TARGET_DIRS+=("custom-packages/snapshot/packages/luci")
+          fi
+
+          echo "📡 Channel: $CHANNEL -> deploying to ${TARGET_DIRS[*]}"
+
+          for TDIR in "${TARGET_DIRS[@]}"; do
+            mkdir -p "$TDIR"
+            echo "🧹 Cleaning old versions in $TDIR..."
+            rm -f "$TDIR"/luci-app-keepalived-*.apk "$TDIR"/luci-i18n-keepalived-*.apk
+
+            find ./release-assets -type f -name "*.apk" | while read -r f; do
+              echo "📥 Deploying $(basename "$f") -> $TDIR/"
+              cp "$f" "$TDIR/"
+            done
+
+            git -C custom-packages add "${TDIR#custom-packages/}/"
+          done
+
+          cd custom-packages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "Update luci-app-keepalived to ${TAG} [${CHANNEL}]"
+          for i in {1..5}; do
+            git pull --rebase origin main && \
+            git push origin main && break || \
+            (echo "Conflict detected, retrying in 5s..." && sleep 5)
+          done
