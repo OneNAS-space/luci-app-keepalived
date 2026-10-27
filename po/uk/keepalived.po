@@ -1172,6 +1172,3 @@ msgstr ""
 #: applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/route.js:53
 msgid "default"
 msgstr "типово"
-
-#~ msgid "Fail"
-#~ msgstr "Невдача"
