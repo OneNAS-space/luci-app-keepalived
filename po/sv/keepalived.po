@@ -273,7 +273,8 @@ msgstr ""
 
 #: applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/vrrp_instance.js:66
 msgid "For this to work, the initial state of this entry must be BACKUP."
-msgstr "För att detta ska fungera måste postens initiala tillstånd vara BACKUP."
+msgstr ""
+"För att detta ska fungera måste postens initiala tillstånd vara BACKUP."
 
 #: applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/vrrp_instance.js:191
 msgid "Force instance to use IPv6"
@@ -1168,6 +1169,3 @@ msgstr "Med samma poster på andra datorer sker den motsatta övergången."
 #: applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/route.js:53
 msgid "default"
 msgstr "standard"
-
-#~ msgid "Fail"
-#~ msgstr "Misslyckas"

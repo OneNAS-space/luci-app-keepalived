@@ -681,8 +681,8 @@ msgid ""
 "Poll to detect media link failure using ETHTOOL, MII or ioctl interface "
 "otherwise uses netlink interface"
 msgstr ""
-"Apklausa, skirta nustatyti medijos ryšio trikčius/gedimus, naudojant – „"
-"ETHTOOL“, MII arba „ioctl“ sąsają ir/arba sietuvą; kitais atvejais "
+"Apklausa, skirta nustatyti medijos ryšio trikčius/gedimus, naudojant – "
+"„ETHTOOL“, MII arba „ioctl“ sąsają ir/arba sietuvą; kitais atvejais "
 "naudojama/-as – „netlink“ sąsaja ir/arba sietuvas"
 
 #: applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/servers.js:44
@@ -848,8 +848,8 @@ msgstr "Siųsti el. pašto pranešimus būklės/būsenos perėjimo metu"
 #: applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/vrrp_instance.js:185
 msgid "Send/Recv VRRP messages from base interface instead of VMAC interface"
 msgstr ""
-"Siųsti/Gauti „VRRP“ žinutes iš bazinės sąsajos ir/arba sietuvo, vietoj „VMAC"
-"“ sąsajos ir/arba sietuvo"
+"Siųsti/Gauti „VRRP“ žinutes iš bazinės sąsajos ir/arba sietuvo, vietoj "
+"„VMAC“ sąsajos ir/arba sietuvo"
 
 #: applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/peers.js:53
 msgid "Sender"
@@ -1211,6 +1211,3 @@ msgstr ""
 #: applications/luci-app-keepalived/htdocs/luci-static/resources/view/keepalived/route.js:53
 msgid "default"
 msgstr "numatyta/-s/-ai"
-
-#~ msgid "Fail"
-#~ msgstr "Nepavyko/-sta"
