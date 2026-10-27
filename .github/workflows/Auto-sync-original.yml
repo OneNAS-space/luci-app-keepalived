@@ -16,6 +16,7 @@ env:
   TZ: Asia/Shanghai
   # ---- 仓库专属配置 ----
   UPSTREAM_REPO: https://github.com/openwrt/luci.git
+  UPSTREAM_BRANCH: openwrt-25.12                     # 上游稳定分支(与编译用的 SDK、发布目录 packages-25.12 保持一致)
   UPSTREAM_PATH: applications/luci-app-keepalived   # 上游仓库中该包所在目录
   TARGET_PKG: luci-app-keepalived                    # 官方 index.json 中的包名
   FEED: luci                                         # 官方 feed 名称 (packages / luci)
@@ -39,8 +40,8 @@ jobs:
       - name: Add upstream and fetch
         run: |
           git remote add upstream "$UPSTREAM_REPO" || true
-          echo "🔄 Fetching upstream..."
-          git fetch upstream master
+          echo "🔄 Fetching upstream branch: $UPSTREAM_BRANCH ..."
+          git fetch upstream "$UPSTREAM_BRANCH"
 
       - name: Fetch and Compare Official Release Version
         run: |
@@ -97,13 +98,13 @@ jobs:
           fi
 
           # 2. 仅针对包路径取最新 Hash,避免大仓库其它改动干扰
-          NEW_HASH=$(git log -n 1 --format="%H" upstream/master -- "$UPSTREAM_PATH")
+          NEW_HASH=$(git log -n 1 --format="%H" upstream/${UPSTREAM_BRANCH} -- "$UPSTREAM_PATH")
 
           if [ -f .upstream_meta ]; then
             OLD_HASH=$(sed -n '1p' .upstream_meta)
           else
             echo "⚠️ .upstream_meta not found! Fallback to path-specific historical commit."
-            OLD_HASH=$(git log -n 1 --skip=5 --format="%H" upstream/master -- "$UPSTREAM_PATH")
+            OLD_HASH=$(git log -n 1 --skip=5 --format="%H" upstream/${UPSTREAM_BRANCH} -- "$UPSTREAM_PATH")
             [ -z "$OLD_HASH" ] && OLD_HASH=$NEW_HASH
           fi
 
@@ -139,7 +140,7 @@ jobs:
 
           # 6. 提取上游包目录并平铺到仓库根目录
           echo "📥 Extracting $UPSTREAM_PATH from upstream..."
-          git checkout upstream/master -- "$UPSTREAM_PATH"
+          git checkout upstream/${UPSTREAM_BRANCH} -- "$UPSTREAM_PATH"
           shopt -s dotglob
           mv "$UPSTREAM_PATH"/* .
           shopt -u dotglob
