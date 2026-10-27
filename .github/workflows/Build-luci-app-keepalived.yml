@@ -28,29 +28,10 @@ jobs:
     outputs:
       tag_name: ${{ steps.version.outputs.tag_name }}
       main_version: ${{ steps.version.outputs.main_version }}
-      channel: ${{ steps.channel.outputs.channel }}
 
     steps:
       - name: 🧾 Checkout repo
         uses: actions/checkout@v7
-
-      - name: 🔀 Detect version channel (snapshot vs release)
-        id: channel
-        run: |
-          if [ -f .official_channel ]; then
-            CH=$(tr -d '[:space:]' < .official_channel)
-          else
-            echo "⚠️ .official_channel not found, defaulting to 'both'."
-            CH="both"
-          fi
-
-          case "$CH" in
-            snapshot|release|both) ;;
-            *) echo "⚠️ Unexpected channel value '$CH', defaulting to 'both'."; CH="both" ;;
-          esac
-
-          echo "channel=$CH" >> "$GITHUB_OUTPUT"
-          echo "📡 Detected channel: $CH"
 
       - name: 🏷️ Extract version info from Git Commit
         id: version
@@ -109,8 +90,6 @@ jobs:
             --exclude='/LICENSE' \
             --exclude='/.upstream_meta' \
             --exclude='/.official_version_release' \
-            --exclude='/.official_version_snapshot' \
-            --exclude='/.official_channel' \
             ./ "feed/luci/applications/${PKG_NAME}/"
 
       - name: 🩹 Inject PKG_VERSION into Makefile
@@ -176,31 +155,31 @@ jobs:
       - name: 🚚 Update luci artifacts
         run: |
           set -e
-          CHANNEL="${{ needs.check.outputs.channel }}"
           TAG="${{ needs.check.outputs.tag_name }}"
 
-          TARGET_DIRS=()
-          if [ "$CHANNEL" = "release" ] || [ "$CHANNEL" = "both" ]; then
-            TARGET_DIRS+=("custom-packages/releases/${RELEASE_DIR}/luci")
+          # 最终路径: releases/packages-25.12/luci
+          TDIR="custom-packages/releases/${RELEASE_DIR}/luci"
+          echo "📡 Deploying to $TDIR"
+
+          mkdir -p "$TDIR"
+          echo "🧹 Cleaning old versions in $TDIR..."
+          rm -f "$TDIR"/luci-app-keepalived-*.apk "$TDIR"/luci-i18n-keepalived-*.apk
+
+          # upload-artifact 会保留通配符之前的目录结构,因此递归查找
+          COUNT=0
+          while IFS= read -r f; do
+            echo "📥 Deploying $(basename "$f") -> $TDIR/"
+            cp "$f" "$TDIR/"
+            COUNT=$((COUNT + 1))
+          done < <(find ./release-assets -type f -name '*.apk')
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ No .apk found in release-assets"
+            find ./release-assets -type f
+            exit 1
           fi
-          if [ "$CHANNEL" = "snapshot" ] || [ "$CHANNEL" = "both" ]; then
-            TARGET_DIRS+=("custom-packages/snapshot/packages/luci")
-          fi
 
-          echo "📡 Channel: $CHANNEL -> deploying to ${TARGET_DIRS[*]}"
-
-          for TDIR in "${TARGET_DIRS[@]}"; do
-            mkdir -p "$TDIR"
-            echo "🧹 Cleaning old versions in $TDIR..."
-            rm -f "$TDIR"/luci-app-keepalived-*.apk "$TDIR"/luci-i18n-keepalived-*.apk
-
-            find ./release-assets -type f -name "*.apk" | while read -r f; do
-              echo "📥 Deploying $(basename "$f") -> $TDIR/"
-              cp "$f" "$TDIR/"
-            done
-
-            git -C custom-packages add "${TDIR#custom-packages/}/"
-          done
+          git -C custom-packages add "${TDIR#custom-packages/}/"
 
           cd custom-packages
           git config user.name "github-actions[bot]"
@@ -211,7 +190,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Update luci-app-keepalived to ${TAG} [${CHANNEL}]"
+          git commit -m "Update luci-app-keepalived to ${TAG}"
           for i in {1..5}; do
             git pull --rebase origin main && \
             git push origin main && break || \
