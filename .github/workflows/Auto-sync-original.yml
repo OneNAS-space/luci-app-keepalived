@@ -216,23 +216,45 @@ jobs:
             exit 0
           fi
 
-          # 按文件名排序依次应用 (00_xxx.patch, 01_xxx.patch ...)
+          # 补丁来自 PR(git format-patch),路径形如 a/applications/luci-app-keepalived/xxx,
+          # 而仓库里包目录已平铺到根目录,因此需要多剥掉 UPSTREAM_PATH 的层数。
+          # a/ + applications/luci-app-keepalived/ => -p3;同时兼容包内相对路径的补丁 (-p1)。
+          DEPTH=$(echo "$UPSTREAM_PATH" | awk -F/ '{print NF}')
+          STRIPS="$((DEPTH + 1)) 1"
+
+          # 按文件名排序依次应用 (000_xxx.patch, 001_xxx.patch ...)
           for patch_file in $(printf '%s\n' "${PATCHES[@]}" | sort); do
             echo ""
             echo "🔎 Detecting the patch status: $patch_file ..."
-            if patch -p1 --dry-run -R --silent < "$patch_file" >/dev/null 2>&1; then
-              echo "⏭️ [Skip] Upstream already contains this patch."
-              continue
-            fi
 
-            if patch -p1 --dry-run --silent < "$patch_file" >/dev/null 2>&1; then
-              echo "🩹 Applying $patch_file ..."
-              patch --batch -p1 < "$patch_file"
-              echo "✅ $patch_file applied successfully!"
-            else
-              echo "❌ Critical Error: $patch_file is neither already applied nor cleanly appliable."
-              exit 1
-            fi
+            STATE=""
+            for P in $STRIPS; do
+              if patch -p"$P" --dry-run -R --silent < "$patch_file" >/dev/null 2>&1; then
+                STATE="applied"; break
+              fi
+              if patch -p"$P" --dry-run --silent < "$patch_file" >/dev/null 2>&1; then
+                STATE="apply"; STRIP="$P"; break
+              fi
+            done
+
+            case "$STATE" in
+              applied)
+                echo "⏭️ [Skip] Upstream already contains this patch."
+                ;;
+              apply)
+                echo "🩹 Applying $patch_file (-p$STRIP) ..."
+                patch --batch -p"$STRIP" < "$patch_file"
+                echo "✅ $patch_file applied successfully!"
+                ;;
+              *)
+                echo "❌ Critical Error: $patch_file is neither already applied nor cleanly appliable."
+                echo "---- dry-run diagnostics (-p$((DEPTH + 1))) ----"
+                patch -p"$((DEPTH + 1))" --dry-run < "$patch_file" || true
+                echo "---- files in working tree ----"
+                ls -la . 2>/dev/null || true
+                exit 1
+                ;;
+            esac
           done
 
           chmod +x root/etc/init.d/* root/etc/uci-defaults/* root/usr/libexec/rpcd/* 2>/dev/null || true
