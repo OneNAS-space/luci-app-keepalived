@@ -16,9 +16,7 @@ on:
 
 env:
   FEEDNAME: jackie264
-  # luci-app 是 noarch,只需用一个 SDK 编译一次
   SDK_ARCH: x86_64-openwrt-25.12
-  # custom-packages 仓库中 release 通道的目录名
   RELEASE_DIR: packages-25.12
 
 jobs:
@@ -46,7 +44,6 @@ jobs:
             BASE_TIMESTAMP=$(git log -1 --format=%ct)
           fi
 
-          # 与官方 luci 应用的版本格式一致: yy.ddd.ssssss~<sha>
           PKG_VERSION_DATE=$(date -u -d "@${BASE_TIMESTAMP}" +'%y.%j')
           PKG_VERSION_SECS=$(printf "%05d" $(( BASE_TIMESTAMP % 86400 )))
           OFFICIAL_VERSION="${PKG_VERSION_DATE}.${PKG_VERSION_SECS}~${COMMIT_SHA}"
@@ -71,8 +68,6 @@ jobs:
       - name: 🧰 Set up Feed structure
         run: |
           set -e
-          # Makefile 末尾是 `include ../../luci.mk`,因此包必须位于 <feed>/luci/applications/<pkg>/,
-          # 并在 <feed>/luci/ 下放一个转发到 SDK 内 luci feed 的 luci.mk。
           mkdir -p package
           printf 'include $(TOPDIR)/feeds/luci/luci.mk\n' > package/luci.mk
 
@@ -85,6 +80,7 @@ jobs:
             --exclude='/package' \
             --exclude='/.github' \
             --exclude='/local-patches' \
+            --exclude='/po' \
             --exclude='/SECURITY.md' \
             --exclude='/README.md' \
             --exclude='/LICENSE' \
@@ -100,8 +96,6 @@ jobs:
 
           MF="feed/luci/applications/${PKG_NAME}/Makefile"
 
-          # 该 Makefile 没有 LUCI_NAME / PKG_VERSION / PKG_RELEASE,
-          # 版本必须在 `include ../../luci.mk` 之前定义(luci.mk 用 ?= 取默认值)。
           if ! grep -q '^include \.\./\.\./luci\.mk' "$MF"; then
             echo "❌ 'include ../../luci.mk' not found in $MF"; exit 1
           fi
@@ -128,10 +122,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.PKG_NAME }}
-          # 主包 + (若 SDK 一并构建了的)翻译包 luci-i18n-keepalived-*
           path: |
             bin/packages/*/${{ env.FEEDNAME }}/luci-app-keepalived*.apk
-            bin/packages/*/${{ env.FEEDNAME }}/luci-i18n-keepalived-*.apk
           if-no-files-found: error
 
   deploy:
@@ -157,7 +149,6 @@ jobs:
           set -e
           TAG="${{ needs.check.outputs.tag_name }}"
 
-          # 最终路径: releases/packages-25.12/luci
           TDIR="custom-packages/releases/${RELEASE_DIR}/luci"
           echo "📡 Deploying to $TDIR"
 
@@ -165,7 +156,6 @@ jobs:
           echo "🧹 Cleaning old versions in $TDIR..."
           rm -f "$TDIR"/luci-app-keepalived-*.apk "$TDIR"/luci-i18n-keepalived-*.apk
 
-          # upload-artifact 会保留通配符之前的目录结构,因此递归查找
           COUNT=0
           while IFS= read -r f; do
             echo "📥 Deploying $(basename "$f") -> $TDIR/"
